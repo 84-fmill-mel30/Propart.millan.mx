@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>PROPART V55 - RPM</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { background: #000; color: #0f0; font-family: courier; text-align: center; }
+        .box { border: 2px solid #0f0; padding: 20px; margin: 20px auto; width: 80%; border-radius: 10px; }
+        h1 { font-size: 60px; margin: 0; }
+        button { background: #0f0; color: #000; padding: 20px 30px; font-size: 20px; border: none; font-weight: bold; margin-top: 20px; cursor: pointer; border-radius: 10px; }
+        #console { height: 200px; overflow-y: scroll; border: 1px solid #333; text-align: left; padding: 10px; font-size: 12px; color: #888; margin-top: 20px; background: #111; }
+    </style>
+</head>
+<body>
+
+    <h2>DIAGNÓSTICO EN VIVO</h2>
+
+    <div class="box">
+        <span>RPM MOTOR</span>
+        <h1 id="rpmDisplay">0000</h1>
+    </div>
+
+    <button id="btnConnect">🔌 CONECTAR VCI</button>
+
+    <div id="console">Esperando conexión...</div>
+
+    <script>
+        let bluetoothDevice;
+        let gattServer;
+        let commandService;
+        let writeCharacteristic;
+        let notifyCharacteristic;
+
+        const logBox = document.getElementById('console');
+        const rpmDisplay = document.getElementById('rpmDisplay');
+
+        function log(text) {
+            console.log(text);
+            logBox.innerHTML += "> " + text + "<br>";
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        document.getElementById('btnConnect').addEventListener('click', connect);
+
+        async function connect() {
+            try {
+                log("🔍 Buscando IOS-Vlink...");
+                bluetoothDevice = await navigator.bluetooth.requestDevice({
+                    acceptAllDevices: true,
+                    optionalServices: ['0000fff0-0000-1000-8000-00805f9b34fb'] 
+                });
+
+                log("Conectando a: " + bluetoothDevice.name);
+                gattServer = await bluetoothDevice.gatt.connect();
+                
+                log("✅ Conectado. Iniciando servicio...");
+                
+                // UUIDs ESTÁNDAR PARA V-LINK / ELM327
+                commandService = await gattServer.getPrimaryService('0000fff0-0000-1000-8000-00805f9b34fb');
+                writeCharacteristic = await commandService.getCharacteristic('0000fff2-0000-1000-8000-00805f9b34fb');
+                notifyCharacteristic = await commandService.getCharacteristic('0000fff1-0000-1000-8000-00805f9b34fb');
+
+                await notifyCharacteristic.startNotifications();
+                notifyCharacteristic.addEventListener('characteristicvaluechanged', handleData);
+
+                log("🚀 SISTEMA LISTO. PIDIENDO DATOS...");
+                
+                // INICIALIZACIÓN (Reset y Protocolo Automático)
+                sendCmd("AT Z");
+                setTimeout(() => sendCmd("AT SP0"), 500);
+                setTimeout(() => sendCmd("010C"), 1000);  // PEDIR RPM
+
+            } catch (error) {
+                log("❌ ERROR: " + error);
+            }
+        }
+
+        function sendCmd(cmd) {
+            if (!writeCharacteristic) return;
+            const encoder = new TextEncoder();
+            // log("Enviando: " + cmd);
+            writeCharacteristic.writeValue(encoder.encode(cmd + '\r'));
+        }
+
+        function handleData(event) {
+            const value = event.target.value;
+            const decoder = new TextDecoder();
+            const rawData = decoder.decode(value).replace(/>/g, '').trim();
+            
+            // log("Rx: " + rawData);
+
+            // FILTRO PARA LEER RPM (Respuesta empieza con 41 0C)
+            if (rawData.includes("41 0C")) {
+                const hexParts = rawData.split(" ");
+                let index = hexParts.indexOf("41");
+                
+                if (index !== -1 && hexParts[index+1] === "0C") {
+                    let A = parseInt(hexParts[index+2], 16);
+                    let B = parseInt(hexParts[index+3], 16);
+                    
+                    // FÓRMULA MATEMÁTICA REAL OBDII
+                    let rpm = ((A * 256) + B) / 4;
+                    rpmDisplay.innerText = Math.round(rpm);
+                    
+                    // PEDIR OTRA VEZ (Bucle infinito para ver la aguja moverse)
+                    setTimeout(() => sendCmd("010C"), 200); 
+                }
+            } else {
+                // Si no es dato de RPM, reintentamos
+                 if(!rawData.includes("SEARCHING")) {
+                     setTimeout(() => sendCmd("010C"), 500);
+                 }
+            }
+        }
+    </script>
+</body>
+</html>
