@@ -1,56 +1,70 @@
-
 <!DOCTYPE html>
 <html lang="es">
-<head> 
+<head>
     <meta charset="UTF-8">
-    <title>PROPART V55 - RPM</title>
+    <title>PROPART V55 - RASTREADOR</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { background: #000; color: #0f0; font-family: courier; text-align: center; }
-        .box { border: 2px solid #0f0; padding: 20px; margin: 20px auto; width: 80%; border-radius: 10px; }
-        h1 { font-size: 60px; margin: 0; }
-        button { background: #0f0; color: #000; padding: 20px 30px; font-size: 20px; border: none; font-weight: bold; margin-top: 20px; cursor: pointer; border-radius: 10px; }
-        #console { height: 200px; overflow-y: scroll; border: 1px solid #333; text-align: left; padding: 10px; font-size: 12px; color: #888; margin-top: 20px; background: #111; }
+        body { background: #000; color: #ff00ff; font-family: monospace; padding: 20px; }
+        button { width: 100%; padding: 20px; font-size: 20px; background: #ff00ff; color: #000; border: none; font-weight: bold; margin-bottom: 20px; }
+        #log { border: 1px solid #555; height: 400px; overflow-y: scroll; padding: 10px; background: #111; color: #fff; font-size: 12px; }
     </style>
 </head>
 <body>
 
-    <h2>DIAGNÓSTICO EN VIVO</h2>
-
-    <div class="box">
-        <span>RPM MOTOR</span>
-        <h1 id="rpmDisplay">0000</h1>
-    </div>
-
-    <button id="btnConnect">🔌 CONECTAR VCI</button>
-
-    <div id="console">Esperando conexión...</div>
+    <h1>🕵️ RASTREADOR DE UUIDs</h1>
+    <button id="btn">🔍 ANALIZAR ESCÁNER</button>
+    <div id="log">Dale click al botón para escanear...</div>
 
     <script>
-        let bluetoothDevice;
-        let gattServer;
-        let commandService;
-        let writeCharacteristic;
-        let notifyCharacteristic;
+        const logBox = document.getElementById('log');
+        function log(msg) { logBox.innerHTML += "> " + msg + "<br>"; }
 
-        const logBox = document.getElementById('console');
-        const rpmDisplay = document.getElementById('rpmDisplay');
-
-        function log(text) {
-            console.log(text);
-            logBox.innerHTML += "> " + text + "<br>";
-            logBox.scrollTop = logBox.scrollHeight;
-        }
-
-        document.getElementById('btnConnect').addEventListener('click', connect);
-
-        async function connect() {
+        document.getElementById('btn').addEventListener('click', async () => {
             try {
-                log("🔍 Buscando IOS-Vlink...");
-                bluetoothDevice = await navigator.bluetooth.requestDevice({
+                log("Buscando dispositivo...");
+                const device = await navigator.bluetooth.requestDevice({
                     acceptAllDevices: true,
-                    optionalServices: ['0000fff0-0000-1000-8000-00805f9b34fb'] 
+                    optionalServices: [
+                        '0000fff0-0000-1000-8000-00805f9b34fb', // V-Link común
+                        '000018f0-0000-1000-8000-00805f9b34fb', // Otro chino
+                        '0000ffe0-0000-1000-8000-00805f9b34fb', // HM-10
+                        '0000e0ff-3c17-d293-8e48-14fe2e4da212'  // Otros
+                    ] 
                 });
 
-                log("Conectando a: " + bluetoothDevice.name);
-         
+                log("Conectando a: " + device.name);
+                const server = await device.gatt.connect();
+                log("✅ CONECTADO. BUSCANDO SERVICIOS...");
+
+                const services = await server.getPrimaryServices();
+                
+                log("--------------------------------");
+                log("🔍 SERVICIOS ENCONTRADOS (" + services.length + "):");
+                
+                for (const service of services) {
+                    log("👉 UUID: " + service.uuid);
+                    
+                    // Intentar ver características dentro del servicio
+                    try {
+                        const chars = await service.getCharacteristics();
+                        for (const c of chars) {
+                            log("   ↳ Char: " + c.uuid);
+                            if (c.properties.notify) log("     (Tiene NOTIFY ✅)");
+                            if (c.properties.write) log("     (Tiene WRITE ✅)");
+                        }
+                    } catch (err) {
+                        log("   (No pude leer dentro de este)");
+                    }
+                    log("--------------------------------");
+                }
+                
+                log("🏁 ANÁLISIS TERMINADO. MÁNDAME FOTO.");
+
+            } catch (error) {
+                log("❌ ERROR: " + error);
+            }
+        });
+    </script>
+</body>
+</html>
